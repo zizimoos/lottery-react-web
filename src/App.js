@@ -406,6 +406,7 @@ let lotteryABI = [
 class App extends Component {
   constructor(props) {
     super(props);
+
     this.state = {
       betRecords: [],
       winRecords: [],
@@ -414,7 +415,7 @@ class App extends Component {
       challenges: ["A", "B"],
       finalRecords: [
         {
-          bettor: "0xabcd....",
+          bettor: "0xabcd...",
           index: "0",
           challenges: "ab",
           answer: "ab",
@@ -426,57 +427,94 @@ class App extends Component {
   }
   async componentDidMount() {
     await this.initWeb3();
-    await this.pollData();
+    // await this.pollData();
+    setInterval(this.pollData, 1000);
   }
 
   pollData = async () => {
     await this.getPot();
-    // await this.getBetEvents();
+    await this.getBetEvents();
+    await this.getWinEvents();
+    await this.getFailEvents();
+    this.makeFinalRecords();
   };
+
   initWeb3 = async () => {
     if (window.ethereum) {
-      console.log("recent mode");
+      console.log("Recent mode");
       this.web3 = new Web3(window.ethereum);
       try {
-        //request account access if needed
+        // Request account access if needed
         await window.ethereum.enable();
-        window.web3.eth.sendTransaction({});
+        // Acccounts now exposed
+        // this.web3.eth.sendTransaction({/* ... */});
       } catch (error) {
-        console.log(`user denied account access error: ${error}`);
+        // User denied account access...
+        console.log(`User denied account access error : ${error}`);
       }
-    } else if (window.web3) {
+    }
+    // Legacy dapp browsers...
+    else if (window.web3) {
       console.log("legacy mode");
       this.web3 = new Web3(Web3.currentProvider);
-      this.web3.eth.sendTransaction({});
-    } else {
+      // Acccounts always exposed
+      // web3.eth.sendTransaction({/* ... */});
+    }
+    // Non-dapp browsers...
+    else {
       console.log(
-        "non-Ethereum browser detected. you should consider trying Metamask!"
+        "Non-Ethereum browser detected. You should consider trying MetaMask!"
       );
     }
-    // console.log(this.web3);
+
     let accounts = await this.web3.eth.getAccounts();
     this.account = accounts[0];
-    console.log(accounts);
 
     this.lotteryContract = new this.web3.eth.Contract(
       lotteryABI,
       lotteryAddress
     );
-    console.log(this.lotteryContract);
-
-    // let pot = await this.lotteryContract.methods.getPot().call();
-    // console.log("pot", pot);
-
-    let owner = await this.lotteryContract.methods.owner().call();
-    console.log("owner", owner);
   };
 
   getPot = async () => {
     let pot = await this.lotteryContract.methods.getPot().call();
     let potString = this.web3.utils.fromWei(pot.toString(), "ether");
-    console.log(potString);
     this.setState({ pot: potString });
   };
+
+  makeFinalRecords = () => {
+    let f = 0,
+      w = 0;
+    const records = [...this.state.betRecords];
+    for (let i = 0; i < this.state.betRecords.length; i += 1) {
+      if (
+        this.state.winRecords.length > 0 &&
+        this.state.betRecords[i].index === this.state.winRecords[w].index
+      ) {
+        records[i].win = "WIN";
+        records[i].answer = records[i].challenges;
+        records[i].pot = this.web3.utils.fromWei(
+          this.state.winRecords[w].amount,
+          "ether"
+        );
+        if (this.state.winRecords.length - 1 > w) w++;
+      } else if (
+        this.state.failRecords.length > 0 &&
+        this.state.betRecords[i].index === this.state.failRecords[f].index
+      ) {
+        records[i].win = "FAIL";
+        records[i].answer = this.state.failRecords[f].answer;
+
+        records[i].pot = 0;
+        if (this.state.failRecords.length - 1 > f) f++;
+      } else {
+        records[i].answer = "Not Revealed";
+      }
+    }
+
+    this.setState({ finalRecords: records });
+  };
+
   getBetEvents = async () => {
     const records = [];
     let events = await this.lotteryContract.getPastEvents("BET", {
@@ -504,8 +542,42 @@ class App extends Component {
     this.setState({ betRecords: records });
   };
 
+  getFailEvents = async () => {
+    const records = [];
+    let events = await this.lotteryContract.getPastEvents("FAIL", {
+      fromBlock: 0,
+      toBlock: "latest",
+    });
+
+    for (let i = 0; i < events.length; i += 1) {
+      const record = {};
+      record.index = parseInt(events[i].returnValues.index, 10).toString();
+      record.answer = events[i].returnValues.answer;
+      records.unshift(record);
+    }
+    console.log(records);
+    this.setState({ failRecords: records });
+  };
+
+  getWinEvents = async () => {
+    const records = [];
+    let events = await this.lotteryContract.getPastEvents("WIN", {
+      fromBlock: 0,
+      toBlock: "latest",
+    });
+
+    for (let i = 0; i < events.length; i += 1) {
+      const record = {};
+      record.index = parseInt(events[i].returnValues.index, 10).toString();
+      record.amount = parseInt(events[i].returnValues.amount, 10).toString();
+      records.unshift(record);
+    }
+    this.setState({ winRecords: records });
+  };
+
   bet = async () => {
-    //nonce
+    // nonce
+
     let challenges =
       "0x" +
       this.state.challenges[0].toLowerCase() +
@@ -524,18 +596,34 @@ class App extends Component {
       });
   };
 
-  // pot money
-  // bet 글자 선택 UI(버튼형식)
+  // Pot money
+
+  // bet 글자 선택 UI(버튼 형식)
   // Bet button
 
   // History table
   // index address challenge answer pot status answerBlockNumber
+
   onClickCard = (_Character) => {
     this.setState({
       challenges: [this.state.challenges[1], _Character],
     });
   };
   getCard = (_Character, _cardStyle) => {
+    let _card = "";
+    if (_Character === "A") {
+      _card = "A";
+    }
+    if (_Character === "B") {
+      _card = "B";
+    }
+    if (_Character === "C") {
+      _card = "C";
+    }
+    if (_Character === "0") {
+      _card = "0";
+    }
+
     return (
       <button
         className={_cardStyle}
@@ -545,41 +633,43 @@ class App extends Component {
       >
         <div className="card-body text-center">
           <p className="card-text"></p>
-          <p className="card-text text-center">{_Character}</p>
+          <p className="card-text text-center" style={{ fontSize: 300 }}>
+            {_card}
+          </p>
           <p className="card-text"></p>
         </div>
       </button>
     );
   };
-
   render() {
     return (
       <div className="App">
+        {/* Header - Pot, Betting characters */}
         <div className="container">
           <div className="jumbotron">
-            <h1>Current Pot: {this.state.pot}</h1>
-            <p>Bet hash Lottery</p>
+            <h1>Current Pot : {this.state.pot}</h1>
+            <p>Lottery</p>
             <p>Lottery tutorial</p>
             <p>Your Bet</p>
             <p>
-              {this.state.challenges[0]}
-              {this.state.challenges[1]}
+              {this.state.challenges[0]} {this.state.challenges[1]}
             </p>
           </div>
         </div>
+
+        {/* Card section */}
         <div className="container">
           <div className="card-group">
             {this.getCard("A", "card bg-primary")}
             {this.getCard("B", "card bg-warning")}
             {this.getCard("C", "card bg-danger")}
-            {this.getCard("D", "card bg-success")}
+            {this.getCard("0", "card bg-success")}
           </div>
         </div>
         <br></br>
         <div className="container">
-          <button className="brn btn-danger btn-lg" onClick={this.bet}>
-            {" "}
-            BET !{" "}
+          <button className="btn btn-danger btn-lg" onClick={this.bet}>
+            BET!
           </button>
         </div>
         <br></br>
@@ -600,13 +690,13 @@ class App extends Component {
               {this.state.finalRecords.map((record, index) => {
                 return (
                   <tr key={index}>
-                    <td>0</td>
-                    <td>0</td>
-                    <td>0</td>
-                    <td>0</td>
+                    <td>{record.index}</td>
+                    <td>{record.bettor}</td>
+                    <td>{record.challenges}</td>
+                    <td>{record.answer}</td>
                     <td>{record.pot}</td>
-                    <td>0</td>
-                    <td>0</td>
+                    <td>{record.win}</td>
+                    <td>{record.targetBlockNumber}</td>
                   </tr>
                 );
               })}
@@ -617,5 +707,5 @@ class App extends Component {
     );
   }
 }
-
+// index address challenge answer pot status answerBlockNumber
 export default App;
